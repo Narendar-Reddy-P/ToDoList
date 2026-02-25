@@ -1,7 +1,13 @@
 import { useState } from "react";
+import { useEffect } from "react";
+const EMPTY_FORM = {
+  title: "",
+  description: "",
+  category: "Maths",
+  priority: "medium",
+};
 
 const CATEGORIES = ["Maths", "Science", "History", "English", "Art"];
-
 const PRIORITY = {
   critical: {
     label: "Critical",
@@ -37,7 +43,7 @@ const PRIORITY = {
   },
 };
 
-const initialTasks = [
+const INITIAL_TASKS = [
   {
     id: 1,
     title: "Complete algebra worksheet",
@@ -72,22 +78,24 @@ const initialTasks = [
   },
 ];
 
-let nextId = 5;
-
-export default function TodoApp() {
-  const [tasks, setTasks] = useState(initialTasks);
+export default function App() {
+  const [tasks, setTasks] = useState([]);
   const [selectedCat, setSelectedCat] = useState("All");
   const [showCompleted, setShowCompleted] = useState(false);
-  const [expandedId, setExpandedId] = useState(null);
-  const [showForm, setShowForm] = useState(false);
+  const [showModal, setShowModal] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
-  const [form, setForm] = useState({
-    title: "",
-    description: "",
-    category: "Maths",
-    priority: "medium",
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
 
+  useEffect(() => {
+    async function loadTasks() {
+      const res = await fetch("http://localhost:5000/api/tasks");
+      const data = await res.json();
+      setTasks(data);
+    }
+    loadTasks();
+  }, []);
+
+  // --- Filtered tasks ---
   const filtered = tasks.filter((t) => {
     const catOk = selectedCat === "All" || t.category === selectedCat;
     const compOk = showCompleted ? t.completed : !t.completed;
@@ -96,18 +104,27 @@ export default function TodoApp() {
 
   const completedCount = tasks.filter((t) => t.completed).length;
 
-  function toggleComplete(id) {
-    setTasks(
-      tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)),
-    );
+  // --- Handlers ---
+  async function handleToggleComplete(id) {
+    const res = await fetch(`http://localhost:5000/api/tasks/${id}/complete`, {
+      method: "PATCH",
+    });
+    const updated = await res.json();
+    setTasks(tasks.map((t) => (t._id === id ? updated : t)));
   }
 
-  function deleteTask(id) {
-    setTasks(tasks.filter((t) => t.id !== id));
-    if (expandedId === id) setExpandedId(null);
+  async function handleDelete(id) {
+    await fetch(`http://localhost:5000/api/tasks/${id}`, { method: "DELETE" });
+    setTasks(tasks.filter((t) => t._id !== id));
   }
 
-  function openEdit(task) {
+  function handleOpenNew() {
+    setEditingTask(null);
+    setForm(EMPTY_FORM);
+    setShowModal(true);
+  }
+
+  function handleOpenEdit(task) {
     setEditingTask(task);
     setForm({
       title: task.title,
@@ -115,30 +132,37 @@ export default function TodoApp() {
       category: task.category,
       priority: task.priority,
     });
-    setShowForm(true);
+    setShowModal(true);
   }
 
-  function openNew() {
-    setEditingTask(null);
-    setForm({
-      title: "",
-      description: "",
-      category: "Maths",
-      priority: "medium",
-    });
-    setShowForm(true);
-  }
-
-  function saveForm() {
+  async function handleSave() {
     if (!form.title.trim()) return;
+    // REPLACE with this:
     if (editingTask) {
-      setTasks(
-        tasks.map((t) => (t.id === editingTask.id ? { ...t, ...form } : t)),
+      const res = await fetch(
+        `http://localhost:5000/api/tasks/${editingTask._id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        },
       );
+      const updated = await res.json();
+      setTasks(tasks.map((t) => (t._id === updated._id ? updated : t)));
     } else {
-      setTasks([...tasks, { id: nextId++, ...form, completed: false }]);
+      const res = await fetch("http://localhost:5000/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const newTask = await res.json();
+      setTasks([...tasks, newTask]);
     }
-    setShowForm(false);
+    setShowModal(false);
+  }
+
+  function handleCloseModal() {
+    setShowModal(false);
   }
 
   return (
@@ -147,300 +171,115 @@ export default function TodoApp() {
         href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap"
         rel="stylesheet"
       />
-      <Priority />
 
+      {/* Priority Legend */}
+      <PriorityLegend />
+
+      {/* Layout */}
       <div className="flex gap-5 max-w-5xl mx-auto">
         {/* Sidebar */}
-        <aside className="w-48 shrink-0 bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-1 h-fit">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-base font-semibold text-stone-800">
-              📋 ToDoList
-            </span>
-            <button
-              onClick={openNew}
-              className="w-7 h-7 bg-stone-900 text-white rounded-lg text-lg flex items-center justify-center hover:bg-stone-700 transition-colors leading-none"
-            >
-              +
-            </button>
-          </div>
+        <Sidebar
+          selectedCat={selectedCat}
+          onSelectCat={setSelectedCat}
+          showCompleted={showCompleted}
+          onToggleCompleted={() => setShowCompleted(!showCompleted)}
+          completedCount={completedCount}
+          onAddNew={handleOpenNew}
+        />
 
-          <p className="text-xs font-semibold tracking-widest text-stone-400 uppercase mb-1">
-            Category
-          </p>
-
-          {["All", ...CATEGORIES].map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCat(cat)}
-              className={`text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                selectedCat === cat
-                  ? "bg-stone-900 text-white"
-                  : "text-stone-600 hover:bg-stone-100"
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-
-          <button
-            onClick={() => setShowCompleted(!showCompleted)}
-            className={`mt-4 text-left px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-              showCompleted
-                ? "bg-stone-900 text-white border-stone-900"
-                : "border-stone-200 text-stone-500 hover:bg-stone-50"
-            }`}
-          >
-            ✓ Completed ({completedCount})
-          </button>
-        </aside>
-
-        {/* Main */}
-        <main className="flex-1 flex flex-col gap-3">
-          {filtered.length === 0 && (
-            <div className="text-center text-stone-400 mt-20 text-sm">
-              No tasks here.{" "}
-              {!showCompleted && (
-                <span
-                  onClick={openNew}
-                  className="text-stone-800 font-semibold underline cursor-pointer"
-                >
-                  Add one?
-                </span>
-              )}
-            </div>
-          )}
-
-          {filtered.map((task) => {
-            const p = PRIORITY[task.priority];
-            const expanded = expandedId === task.id;
-            return (
-              <div
-                key={task.id}
-                className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden transition-all ${p.border} ${expanded ? p.bg : ""} ${task.completed ? "opacity-60" : ""}`}
-              >
-                <div className="flex items-center gap-3 px-4 py-3.5">
-                  <input
-                    type="checkbox"
-                    checked={task.completed}
-                    onChange={() => toggleComplete(task.id)}
-                    className="w-4 h-4 cursor-pointer accent-stone-800 shrink-0"
-                  />
-                  <span
-                    className={`flex-1 text-sm font-medium text-stone-800 ${task.completed ? "line-through" : ""}`}
-                  >
-                    {task.title}
-                  </span>
-                  <span
-                    className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${p.badge}`}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${p.dot}`} />
-                    {p.label}
-                  </span>
-                  <span className="text-xs text-stone-500 bg-stone-100 px-2.5 py-1 rounded-full">
-                    {task.category}
-                  </span>
-                  <button
-                    onClick={() => openEdit(task)}
-                    className="text-sm opacity-50 hover:opacity-100 transition-opacity px-1"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => deleteTask(task.id)}
-                    className="text-sm opacity-50 hover:opacity-100 transition-opacity px-1"
-                  >
-                    🗑
-                  </button>
-                  <button
-                    onClick={() => setExpandedId(expanded ? null : task.id)}
-                    className="text-stone-500 font-bold text-base px-1 hover:text-stone-900 transition-colors"
-                  >
-                    {expanded ? "∧" : "∨"}
-                  </button>
-                </div>
-
-                {expanded && (
-                  <div className="px-4 pb-4 pt-1 border-t border-stone-100 ml-10">
-                    <p className="text-sm text-stone-600 leading-relaxed mt-2">
-                      {task.description || (
-                        <em className="text-stone-400">
-                          No description provided.
-                        </em>
-                      )}
-                    </p>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </main>
+        {/* Main task list */}
+        <Main
+          tasks={filtered}
+          showCompleted={showCompleted}
+          onToggleComplete={handleToggleComplete}
+          onEdit={handleOpenEdit}
+          onDelete={handleDelete}
+          onAddNew={handleOpenNew}
+        />
       </div>
 
       {/* Modal */}
-      {showForm && (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-          onClick={() => setShowForm(false)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl p-7 w-110 flex flex-col gap-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-xl font-bold text-stone-900">
-              {editingTask ? "Edit Task" : "New Task"}
-            </h2>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-stone-400 uppercase tracking-widest">
-                Title
-              </label>
-              <input
-                className="border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-800 bg-stone-50 outline-none focus:border-stone-400"
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="Task title..."
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-stone-400 uppercase tracking-widest">
-                Description
-              </label>
-              <textarea
-                className="border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-800 bg-stone-50 outline-none focus:border-stone-400 resize-y h-20"
-                value={form.description}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-                placeholder="Task description..."
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <div className="flex-1 flex flex-col gap-1">
-                <label className="text-xs font-semibold text-stone-400 uppercase tracking-widest">
-                  Category
-                </label>
-                <select
-                  className="border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-800 bg-stone-50 outline-none"
-                  value={form.category}
-                  onChange={(e) =>
-                    setForm({ ...form, category: e.target.value })
-                  }
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex-1 flex flex-col gap-1">
-                <label className="text-xs font-semibold text-stone-400 uppercase tracking-widest">
-                  Priority
-                </label>
-                <select
-                  className="border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-800 bg-stone-50 outline-none"
-                  value={form.priority}
-                  onChange={(e) =>
-                    setForm({ ...form, priority: e.target.value })
-                  }
-                >
-                  {Object.entries(PRIORITY).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Priority preview */}
-            <div
-              className={`flex items-center gap-2.5 px-4 py-3 rounded-xl ${PRIORITY[form.priority].bg}`}
-            >
-              <span
-                className={`w-2.5 h-2.5 rounded-full shrink-0 ${PRIORITY[form.priority].dot}`}
-              />
-              <span
-                className={`text-sm font-semibold ${PRIORITY[form.priority].badge.split(" ")[1]}`}
-              >
-                {PRIORITY[form.priority].label} Priority
-              </span>
-              <span className="text-xs text-stone-400 ml-1">
-                — {PRIORITY[form.priority].hint}
-              </span>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-1">
-              <button
-                onClick={() => setShowForm(false)}
-                className="px-5 py-2 text-sm font-medium border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveForm}
-                className="px-5 py-2 text-sm font-semibold bg-stone-900 text-white rounded-xl hover:bg-stone-700 transition-colors"
-              >
-                Save Task
-              </button>
-            </div>
-          </div>
-        </div>
+      {showModal && (
+        <Modal
+          isEditing={!!editingTask}
+          form={form}
+          onFormChange={setForm}
+          onSave={handleSave}
+          onClose={handleCloseModal}
+        />
       )}
     </div>
   );
 }
 
-function Priority() {
+/**
+ * PriorityLegend
+ * Displays a horizontal legend bar showing all priority levels with color dots and hints.
+ */
+function PriorityLegend() {
   return (
     <div className="flex flex-wrap gap-4 mb-5 bg-white rounded-xl px-5 py-3 w-fit shadow-sm">
       <span className="text-xs font-semibold text-stone-400 uppercase tracking-widest self-center mr-1">
         Priority:
       </span>
-      {Object.entries(PRIORITY).map(([k, v]) => (
+      {Object.entries(PRIORITY).map(([key, p]) => (
         <span
-          key={k}
+          key={key}
           className="flex items-center gap-1.5 text-sm font-medium text-stone-600"
         >
-          <span className={`w-2.5 h-2.5 rounded-full ${v.dot}`} />
-          {v.label}
-          <span className="text-stone-400 text-xs">— {v.hint}</span>
+          <span className={`w-2.5 h-2.5 rounded-full ${p.dot}`} />
+          {p.label}
+          <span className="text-stone-400 text-xs">— {p.hint}</span>
         </span>
       ))}
     </div>
   );
 }
 
+/**
+ * Sidebar
+ * Props:
+ *  - selectedCat: string — currently selected category
+ *  - onSelectCat: (cat: string) => void
+ *  - showCompleted: boolean
+ *  - onToggleCompleted: () => void
+ *  - completedCount: number
+ *  - onAddNew: () => void
+ */
 function Sidebar({
-  openNew,
-  setSelectedCat,
-  setShowCompleted,
-  showCompleted,
-  completedCount,
   selectedCat,
+  onSelectCat,
+  showCompleted,
+  onToggleCompleted,
+  completedCount,
+  onAddNew,
 }) {
   return (
     <aside className="w-48 shrink-0 bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-1 h-fit">
+      {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <span className="text-base font-semibold text-stone-800">
           📋 ToDoList
         </span>
         <button
-          onClick={openNew}
+          onClick={onAddNew}
+          title="Add new task"
           className="w-7 h-7 bg-stone-900 text-white rounded-lg text-lg flex items-center justify-center hover:bg-stone-700 transition-colors leading-none"
         >
           +
         </button>
       </div>
 
+      {/* Category label */}
       <p className="text-xs font-semibold tracking-widest text-stone-400 uppercase mb-1">
         Category
       </p>
 
+      {/* Category buttons */}
       {["All", ...CATEGORIES].map((cat) => (
         <button
           key={cat}
-          onClick={() => setSelectedCat(cat)}
+          onClick={() => onSelectCat(cat)}
           className={`text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
             selectedCat === cat
               ? "bg-stone-900 text-white"
@@ -451,8 +290,9 @@ function Sidebar({
         </button>
       ))}
 
+      {/* Completed toggle */}
       <button
-        onClick={() => setShowCompleted(!showCompleted)}
+        onClick={onToggleCompleted}
         className={`mt-4 text-left px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
           showCompleted
             ? "bg-stone-900 text-white border-stone-900"
@@ -462,5 +302,267 @@ function Sidebar({
         ✓ Completed ({completedCount})
       </button>
     </aside>
+  );
+}
+
+/**
+ * TaskCard
+ * A single task row with expand/collapse, edit, delete, and complete toggle.
+ */
+function TaskCard({ task, onToggleComplete, onEdit, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  const p = PRIORITY[task.priority];
+
+  return (
+    <div
+      className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden transition-all
+        ${p.border}
+        ${expanded ? p.bg : ""}
+        ${task.completed ? "opacity-60" : ""}
+      `}
+    >
+      {/* Collapsed row */}
+      <div className="flex items-center gap-3 px-4 py-3.5">
+        <input
+          type="checkbox"
+          checked={task.completed}
+          onChange={() => onToggleComplete(task._id)}
+          className="w-4 h-4 cursor-pointer accent-stone-800 shrink-0"
+        />
+
+        <span
+          className={`flex-1 text-sm font-medium text-stone-800 ${
+            task.completed ? "line-through" : ""
+          }`}
+        >
+          {task.title}
+        </span>
+
+        {/* Priority badge */}
+        <span
+          className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${p.badge}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${p.dot}`} />
+          {p.label}
+        </span>
+
+        {/* Category badge */}
+        <span className="text-xs text-stone-500 bg-stone-100 px-2.5 py-1 rounded-full">
+          {task.category}
+        </span>
+
+        {/* Edit */}
+        <button
+          onClick={() => onEdit(task)}
+          title="Edit"
+          className="text-sm opacity-50 hover:opacity-100 transition-opacity px-1"
+        >
+          ✏️
+        </button>
+
+        {/* Delete */}
+        <button
+          onClick={() => onDelete(task._id)}
+          title="Delete"
+          className="text-sm opacity-50 hover:opacity-100 transition-opacity px-1"
+        >
+          🗑
+        </button>
+
+        {/* Expand / Collapse */}
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-stone-500 font-bold text-base px-1 hover:text-stone-900 transition-colors"
+        >
+          {expanded ? "∧" : "∨"}
+        </button>
+      </div>
+
+      {/* Expanded description */}
+      {expanded && (
+        <div className="px-4 pb-4 pt-1 border-t border-stone-100 ml-10">
+          <p className="text-sm text-stone-600 leading-relaxed mt-2">
+            {task.description || (
+              <em className="text-stone-400">No description provided.</em>
+            )}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Main
+ * Renders the list of filtered tasks or an empty state.
+ * Props:
+ *  - tasks: Task[]
+ *  - showCompleted: boolean — used to show the "Add one?" link only on active tab
+ *  - onToggleComplete: (id) => void
+ *  - onEdit: (task) => void
+ *  - onDelete: (id) => void
+ *  - onAddNew: () => void
+ */
+function Main({
+  tasks,
+  showCompleted,
+  onToggleComplete,
+  onEdit,
+  onDelete,
+  onAddNew,
+}) {
+  return (
+    <main className="flex-1 flex flex-col gap-3">
+      {tasks.length === 0 && (
+        <div className="text-center text-stone-400 mt-20 text-sm">
+          No tasks here.{" "}
+          {!showCompleted && (
+            <span
+              onClick={onAddNew}
+              className="text-stone-800 font-semibold underline cursor-pointer"
+            >
+              Add one?
+            </span>
+          )}
+        </div>
+      )}
+
+      {tasks.map((task) => (
+        <TaskCard
+          key={task._id}
+          task={task}
+          onToggleComplete={onToggleComplete}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      ))}
+    </main>
+  );
+}
+
+/**
+ * Modal
+ * Add / Edit task form shown as an overlay.
+ * Props:
+ *  - isEditing: boolean — true if editing an existing task
+ *  - form: { title, description, category, priority }
+ *  - onFormChange: (updatedForm) => void
+ *  - onSave: () => void
+ *  - onClose: () => void
+ */
+function Modal({ isEditing, form, onFormChange, onSave, onClose }) {
+  function update(field, value) {
+    onFormChange({ ...form, [field]: value });
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl p-7 w-110 flex flex-col gap-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Title */}
+        <h2 className="text-xl font-bold text-stone-900">
+          {isEditing ? "Edit Task" : "New Task"}
+        </h2>
+
+        {/* Title field */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-semibold text-stone-400 uppercase tracking-widest">
+            Title
+          </label>
+          <input
+            className="border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-800 bg-stone-50 outline-none focus:border-stone-400"
+            value={form.title}
+            onChange={(e) => update("title", e.target.value)}
+            placeholder="Task title..."
+          />
+        </div>
+
+        {/* Description field */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-semibold text-stone-400 uppercase tracking-widest">
+            Description
+          </label>
+          <textarea
+            className="border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-800 bg-stone-50 outline-none focus:border-stone-400 resize-y h-20"
+            value={form.description}
+            onChange={(e) => update("description", e.target.value)}
+            placeholder="Task description..."
+          />
+        </div>
+
+        {/* Category + Priority row */}
+        <div className="flex gap-3">
+          <div className="flex-1 flex flex-col gap-1">
+            <label className="text-xs font-semibold text-stone-400 uppercase tracking-widest">
+              Category
+            </label>
+            <select
+              className="border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-800 bg-stone-50 outline-none"
+              value={form.category}
+              onChange={(e) => update("category", e.target.value)}
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex-1 flex flex-col gap-1">
+            <label className="text-xs font-semibold text-stone-400 uppercase tracking-widest">
+              Priority
+            </label>
+            <select
+              className="border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-800 bg-stone-50 outline-none"
+              value={form.priority}
+              onChange={(e) => update("priority", e.target.value)}
+            >
+              {Object.entries(PRIORITY).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Priority Preview */}
+        <PriorityPreview priority={form.priority} />
+
+        {/* Action buttons */}
+        <div className="flex justify-end gap-3 mt-1">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 text-sm font-medium border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSave}
+            className="px-5 py-2 text-sm font-semibold bg-stone-900 text-white rounded-xl hover:bg-stone-700 transition-colors"
+          >
+            Save Task
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PriorityPreview({ priority }) {
+  const p = PRIORITY[priority];
+
+  return (
+    <div className={`flex items-center gap-2.5 px-4 py-3 rounded-xl ${p.bg}`}>
+      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${p.dot}`} />
+      <span className={`text-sm font-semibold ${p.badge.split(" ")[1]}`}>
+        {p.label} Priority
+      </span>
+      <span className="text-xs text-stone-400 ml-1">— {p.hint}</span>
+    </div>
   );
 }
